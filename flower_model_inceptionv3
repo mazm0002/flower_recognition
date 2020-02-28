@@ -1,0 +1,131 @@
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import cv2
+import matplotlib.pyplot as plt
+from keras.preprocessing.image import ImageDataGenerator
+from keras import layers
+from keras.layers import Input, Dense, Activation, ZeroPadding2D, BatchNormalization, Flatten, Conv2D
+from keras.layers import AveragePooling2D, MaxPooling2D, Dropout, GlobalMaxPooling2D, GlobalAveragePooling2D
+from keras.models import Model
+from keras.preprocessing import image
+from keras.utils import layer_utils
+from keras.utils.data_utils import get_file
+from keras.applications.imagenet_utils import preprocess_input
+import pydot
+from IPython.display import SVG
+from keras.utils.vis_utils import model_to_dot
+from keras.utils import plot_model
+from keras.utils import to_categorical
+from keras import regularizers
+import tensorflow as tf
+from keras.applications.inception_v3 import InceptionV3
+from keras.preprocessing import image
+from keras.models import Model
+from keras.layers import Dense, GlobalAveragePooling2D
+from keras import backend as K
+from keras.optimizers import SGD
+from keras.models import load_model
+
+import os
+
+
+# Preprocessing data
+DATADIR="/kaggle/input/flowers-recognition/flowers/"
+CATEGORIES=["daisy","tulip","dandelion","sunflower","rose"]
+IMG_SIZE=200
+training_data=[]
+def create_training_data():
+    for category in CATEGORIES:
+        path=os.path.join(DATADIR,category)
+        class_num=CATEGORIES.index(category)
+        for img in os.listdir(path):
+            try:
+                img_array=cv2.imread(os.path.join(path,img))
+                new_array=cv2.resize(img_array,(IMG_SIZE,IMG_SIZE))
+                training_data.append([new_array,class_num])
+            except:
+                pass
+
+
+create_training_data()
+
+# Shuffling data
+import random
+random.shuffle(training_data)
+
+# Seperating features and labels into x and y arrays
+x = []
+y = []
+for features, labels in training_data:
+    x.append(features)
+    y.append(labels)
+x = np.array(x) / 255.
+print(x.shape)
+y = np.array(y)
+y = np.expand_dims(y, axis=1)
+y = to_categorical(y, 5)
+
+
+
+# Loading the InceptionV3 pretrained CNN model
+base_model=InceptionV3(weights='imagenet',include_top=False)
+
+
+# Adding top layers
+preds=base_model.output
+preds=GlobalAveragePooling2D()(preds)
+preds=Dense(1024,activation='relu')(preds)
+preds=Dense(5,activation="softmax")(preds)
+
+# Setting up the model
+flower_model=Model(inputs=base_model.input,outputs=preds)
+
+# Freezing the layers in the base_model
+for layer in base_model.layers:
+    layer.trainable=False
+
+
+# Compile the model
+flower_model.compile(optimizer="rmsprop",loss="categorical_crossentropy",metrics=["accuracy"])
+
+# Train the top layers for a few epochs
+flower_model.fit(x,y,batch_size=32,epochs=15,validation_split=0.2)
+
+# Print the number of layers in the base model
+for i,layer in enumerate(base_model.layers):
+    print(i,layer.name)
+
+# Freeze the first 249 layers
+for layer in flower_model.layers[:249]:
+    layer.trainable=False
+    for layer in flower_model.layers[249:]:
+        layer.trainable = True
+
+# Compile model using stochastic gradient descent
+flower_model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model for 15 epochs
+flower_model.fit(x, y, batch_size=32, epochs=15, validation_split=0.2)
+
+# Save the model
+flower_model.save("flower_model.h5")
+
+# Load the model
+model = load_model('flower_model.h5')
+
+# Test the model with a picture of a tullip
+DATADIR2 = "/kaggle/input/flowers/nurserylive-pink-tulip-van-eijk.jpg"
+im = cv2.imread(DATADIR2)
+imgplot = plt.imshow(im)
+plt.show()
+new_array = cv2.resize(im, (IMG_SIZE, IMG_SIZE))
+img = np.array(new_array) / 255.
+img.resize(1, img.shape[0], img.shape[1], img.shape[2])
+print(img.shape)
+
+
+pred = model.predict(img)
+pred = np.array(pred)
+
+preds_classes = np.argmax(pred, axis=-1)
+
